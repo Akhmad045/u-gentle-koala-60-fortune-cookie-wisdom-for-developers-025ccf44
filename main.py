@@ -1,60 +1,77 @@
 #!/usr/bin/env python3
-"""Entry for 'Fortune Cookie Wisdom for Developers'.
+"""Fortune Cookie Wisdom for Developers — a make.fun entry.
 
-Writes one original fortune-cookie line for a software developer to
-/output/entry.txt, then verifies the written file round-trips exactly.
-Standard library only; no network access.
+This program holds one original fortune-cookie line written for a
+software developer and places it in /output/entry.txt, the file the
+competition gate reads. Before writing anything it checks the line
+against the gate's rules: UTF-8 text, 1 to 120 characters, a single
+line, nothing blank and no control characters. After writing it reads
+the file back and confirms the bytes on disk are exactly the line it
+meant to write.
+
+Only the Python standard library is used, and nothing here touches
+the network.
 """
 
-import os
 import sys
+from pathlib import Path
 
-LINE = (
+FORTUNE = (
     "The legacy code you curse was written by someone in a hurry, "
     "just like you are now."
 )
-
-OUTPUT_PATH = "/output/entry.txt"
-
-
-def validate(text: str) -> str:
-    """Return the entry line, or raise ValueError with the reason it fails."""
-    if not text or not text.strip():
-        raise ValueError("entry is empty or only whitespace")
-    if text != text.strip():
-        raise ValueError("entry has leading or trailing whitespace")
-    if "\n" in text or "\r" in text:
-        raise ValueError("entry must be a single line")
-    if any(ord(ch) < 0x20 for ch in text):
-        raise ValueError("entry contains a control character")
-    if not 1 <= len(text) <= 120:
-        raise ValueError(f"entry is {len(text)} characters, must be 1-120")
-    # The gate reads the file as UTF-8, so confirm the bytes decode back
-    # to exactly the same text before we ever write it.
-    if text.encode("utf-8").decode("utf-8") != text:
-        raise ValueError("entry does not round-trip through UTF-8")
-    return text
+DESTINATION = Path("/output/entry.txt")
+LIMIT = 120
 
 
-def main() -> int:
+def problems(line):
+    """List every way `line` breaks the gate rules (empty means fine)."""
+    found = []
+    if not line.strip():
+        found.append("the line is empty or only whitespace")
+    if line != line.strip():
+        found.append("the line starts or ends with whitespace")
+    if any(ch in line for ch in ("\n", "\r")):
+        found.append("the line spans more than one line")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in line):
+        found.append("the line holds a control character")
+    if len(line) > LIMIT:
+        found.append(
+            f"the line is {len(line)} characters, over the {LIMIT} limit"
+        )
     try:
-        text = validate(LINE)
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        round_tripped = line.encode("utf-8").decode("utf-8")
+    except UnicodeError:
+        found.append("the line is not valid UTF-8 text")
+    else:
+        if round_tripped != line:
+            found.append("the line does not survive a UTF-8 round trip")
+    return found
+
+
+def run():
+    faults = problems(FORTUNE)
+    if faults:
+        for fault in faults:
+            print(f"invalid entry: {fault}", file=sys.stderr)
         return 1
 
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    with open(OUTPUT_PATH, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text + "\n")
+    DESTINATION.parent.mkdir(parents=True, exist_ok=True)
+    with DESTINATION.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(FORTUNE + "\n")
 
-    raw = open(OUTPUT_PATH, "rb").read()
-    if raw.decode("utf-8") != text + "\n":
-        print("error: written file does not round-trip exactly", file=sys.stderr)
+    on_disk = DESTINATION.read_bytes()
+    wanted = (FORTUNE + "\n").encode("utf-8")
+    if on_disk != wanted:
+        print(
+            "invalid entry: the file on disk differs from the line",
+            file=sys.stderr,
+        )
         return 1
 
-    print(f"wrote {len(text)} characters to {OUTPUT_PATH}")
+    print(f"entry written: {len(FORTUNE)} characters in {DESTINATION}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())
